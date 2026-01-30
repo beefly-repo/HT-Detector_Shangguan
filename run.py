@@ -1,4 +1,5 @@
 from ultralytics import YOLO
+from pathlib import Path
 
 if __name__ == '__main__':
     # Load a model
@@ -7,7 +8,7 @@ if __name__ == '__main__':
     model = YOLO('yolov8n.yaml').load('weights/yolo/yolov8n.pt')  # build from YAML and transfer weights
 
     # Train the model
-    results = model.train(data='C:/Users/李肖夏/Desktop/Peng/Peng/custom/detectImg/cuvette_Peng.v1i.yolov8/data.yaml', epochs=300, device=0)
+    results = model.train(data=Path.joinpath(Path(__file__).resolve().parent, "custom/detectImg/cuvette_Shenhao.v1i.yolov8/data.yaml"), epochs=300, device=0)
     metrics = model.val()  # 在验证集上评估模型性能
 
     # # Load a model
