@@ -249,12 +249,14 @@ class Results(SimpleClass):
         pred_boxes, show_boxes = self.obb if is_obb else self.boxes, boxes
         pred_masks, show_masks = self.masks, masks
         pred_probs, show_probs = self.probs, probs
+        from interface import output_font_size, output_font
         annotator = Annotator(
             deepcopy(self.orig_img if img is None else img),
             line_width,
-            font_size,
-            font,
-            pil or (pred_probs is not None and show_probs),  # Classify tasks default to pil=True
+            font_size=output_font_size,
+            font=output_font,
+            # pil or (pred_probs is not None and show_probs),  # Classify tasks default to pil=True
+            pil=True,
             example=names,
         )
 
@@ -278,7 +280,10 @@ class Results(SimpleClass):
             print('show_boxes=', show_boxes)
             from interface import (x0_ratio, y0_ratio, x1_ratio, y1_ratio, mode, con_list,
                                     rgb_calculate_accuracy,rgb_display_accuracy, con_display_accuracy,
-                                   color_channel, results_dir, add_light)
+                                   color_channel, results_dir, add_light,
+                                   Order_Con_R_G_B, color_No, color_Con, color_R, color_G, color_B,
+                                   distance_between_No_cuvette, distance_between_cuvette_Con,
+                                   distance_between_Con_R_G_B)
             from scipy import stats
             import os, json
 
@@ -301,18 +306,36 @@ class Results(SimpleClass):
             # # print('formula file name: ', formula_file)
             coor_list = []
             # store all the sample information in each image for both linear stage and detection stage
-            linear_reg_dict = {'Name': str, 'No.': [], 'Con.': [], 'Red': [], 'Green': [], 'Blue': []}
+            linear_reg_dict = {'Name': str, 'No.': [], 'Con.': [], 'Red': [], 'Green': [], 'Blue': [],
+                               '': [], 'x0_con': [], 'y0_con': [], 'x1_con': [], 'y1_con': [], 'w_con': [], 'h_con': []}
             linear_reg_R_formula_dict = {'slope': [], 'intercept': [], 'r': [], 'R2': [], 'p': [], 'std_err': []}
             linear_reg_G_formula_dict = {'slope': [], 'intercept': [], 'r': [], 'R2': [], 'p': [], 'std_err': []}
             linear_reg_B_formula_dict = {'slope': [], 'intercept': [], 'r': [], 'R2': [], 'p': [], 'std_err': []}
-            detection_dict = {'Name': str, 'No.': [], 'Con.': [], 'Red': [], 'Green': [], 'Blue': []}
+            detection_dict = {'Name': str, 'No.': [], 'Con.': [], 'Red': [], 'Green': [], 'Blue': [],
+                              '': [], 'x0_con': [], 'y0_con': [], 'x1_con': [], 'y1_con': [], 'w_con': [], 'h_con': []}
             img_name = os.path.split(self.path)[-1].split('.')[0]
             linear_reg_dict['Name'] = img_name
             detection_dict['Name'] = img_name
             # print('img_name=', img_name)
             #check mode and color channel, the default is mode='linear', color_channel='B'
             if mode not in ['linear', 'detection']: mode = 'linear'
-            if color_channel not in ['R', 'G', 'B']: color_channel = 'B'
+
+            # if color_channel not in ['R', 'G', 'B']: color_channel = 'B'
+##改动1
+            # 收集所有 cuvette(class==0) 框的 y0(顶部) 和 y1(底部)
+            cuvette_y0_list = []
+            cuvette_y1_list = []
+            cuvette_x0_list = []  # 新增
+            cuvette_x1_list = []  # 新增
+            cuvette_index = 0
+            for item in pred_boxes.cls:
+                if item.item() == 0:  # cuvette class
+                    cuvette_x0_list.append(pred_boxes.xyxy[cuvette_index][0].item())  # 新增
+                    cuvette_y0_list.append(pred_boxes.xyxy[cuvette_index][1].item())
+                    cuvette_x1_list.append(pred_boxes.xyxy[cuvette_index][2].item())  # 新增
+                    cuvette_y1_list.append(pred_boxes.xyxy[cuvette_index][3].item())
+                cuvette_index = cuvette_index + 1
+            cuvette_boxes = sorted(zip(cuvette_x0_list, cuvette_x1_list), key=lambda b: b[0])  # 新增
 
             # sort the coordinates of the expected class
             for item in pred_boxes.cls:
@@ -333,8 +356,19 @@ class Results(SimpleClass):
             have_table = False
             if have_table: x0_last = 0
             if have_table: overall_list = [('No.', 'Con.', 'Blue', 'Green', 'Red')] # the overall list of the ids, concentrations, and RGBs
+
             id_dict = {} # save the ids and their corresponding positions in a dictionary
             light_dict = {} # save the lights and their corresponding positions in a dictionary
+#改动2
+            con_dict = {}  # 存储每个样本的 Con./RGB 信息，延迟到循环外统一绘制
+            # 计算 No. 的统一 y 坐标：所有 cuvette 框顶部最小值 - cuvette标签文字高度 - 100
+            # 注意：cuvette 标签文字绘制在框顶部之上，这里用 annotator 的字体来获取文字高度
+            cuvette_label_h = annotator.font.getsize("cuvette")[1] if hasattr(annotator, 'font') else 40
+            no_label_h = annotator.font.getsize("No.1")[1] if hasattr(annotator, 'font') else 40  # 新增
+            no_y = int(min(cuvette_y0_list)) - cuvette_label_h - distance_between_No_cuvette - no_label_h  # 使用 distance_between_No_cuvette 控制间距
+            # 计算 Con. 的统一 y 坐标：所有 cuvette 框底部最大值 + 100
+            con_y = int(max(cuvette_y1_list)) + distance_between_cuvette_Con
+
             # handle each sample in one image
             for coor in coor_list:
                 # print('coor', coor)
@@ -372,7 +406,8 @@ class Results(SimpleClass):
                     w_con, h_con = (x1_con - x0_con), (y1_con - y0_con)
                     # print('xywh_con', x0_con, y0_con, x1_con, y1_con, w_con, h_con)
                 # calculate the average RGB values of a sample in one image
-                r_avg, g_avg, b_avg = self.calAvgRgb(annotator.im, x0_con, y0_con, w_con, h_con, rgb_calculate_accuracy)
+                # r_avg, g_avg, b_avg = self.calAvgRgb(annotator.im, x0_con, y0_con, w_con, h_con, rgb_calculate_accuracy)
+                r_avg, g_avg, b_avg = self.calAvgRgb(self.orig_img, x0_con, y0_con, w_con, h_con, rgb_calculate_accuracy)
 
                 # mark the concentration area
                 mybox = torch.tensor([x0_con, y0_con, x1_con, y1_con], device='cuda:0')
@@ -387,6 +422,13 @@ class Results(SimpleClass):
                     linear_reg_dict['Red'].append(r_avg)
                     linear_reg_dict['Green'].append(g_avg)
                     linear_reg_dict['Blue'].append(b_avg)
+                    linear_reg_dict[''].append('')
+                    linear_reg_dict['x0_con'].append(x0_con)
+                    linear_reg_dict['y0_con'].append(y0_con)
+                    linear_reg_dict['x1_con'].append(x1_con)
+                    linear_reg_dict['y1_con'].append(y1_con)
+                    linear_reg_dict['w_con'].append(w_con)
+                    linear_reg_dict['h_con'].append(h_con)
 
                     # b_avg_list.append(b_avg)
                     # c_con = con_list[id-1]
@@ -397,6 +439,13 @@ class Results(SimpleClass):
                     detection_dict['Red'].append(r_avg)
                     detection_dict['Green'].append(g_avg)
                     detection_dict['Blue'].append(b_avg)
+                    detection_dict[''].append('')
+                    detection_dict['x0_con'].append(x0_con)
+                    detection_dict['y0_con'].append(y0_con)
+                    detection_dict['x1_con'].append(x1_con)
+                    detection_dict['y1_con'].append(y1_con)
+                    detection_dict['w_con'].append(w_con)
+                    detection_dict['h_con'].append(h_con)
 
 
                     # read the linear regression formula
@@ -472,11 +521,12 @@ class Results(SimpleClass):
                 # print('g_avg = ', g_avg)
                 # print('green_text = ', green_text)
 
-                annotator.text([int(x0), int(y1) + y_bias], "Con.:" + str(con_dis), txt_color=(0, 0, 0))
-                annotator.text([int(x0), int(y1) + y_bias + txt_bias * 1], "G:" + str(g_dis), txt_color=(0, 255, 0))
-                annotator.text([int(x0), int(y1) + y_bias + txt_bias * 2], "B:" + str(b_dis), txt_color=(255, 0, 0))
-                annotator.text([int(x0), int(y1) + y_bias + txt_bias * 3], "R:" + str(r_dis), txt_color=(0, 0, 255))
-
+                # annotator.text([int(x0), int(y1) + y_bias], "Con.:" + str(con_dis), txt_color=(0, 0, 0))
+                # annotator.text([int(x0), int(y1) + y_bias + txt_bias * 1], "G:" + str(g_dis), txt_color=(0, 255, 0))
+                # annotator.text([int(x0), int(y1) + y_bias + txt_bias * 2], "B:" + str(b_dis), txt_color=(255, 0, 0))
+                # annotator.text([int(x0), int(y1) + y_bias + txt_bias * 3], "R:" + str(r_dis), txt_color=(0, 0, 255))
+#改动3
+                con_dict[str(id)] = [int(cuvette_boxes[id - 1][0]), con_dis, r_dis, g_dis, b_dis]
                 # annotator.text([int(x0), int(y1) - y_bias * 8 - txt_bias * 2], "No." + str(id), txt_color=(0, 0, 0))
                 if add_light:
                     if con_dis < 5:
@@ -486,7 +536,11 @@ class Results(SimpleClass):
                     else: # 5<con_dis<30
                         light = os.path.join(os.getcwd(), 'custom/lightImg/yellow_BGR.png')
                     light_dict[str(id)] = [int(x0)+15, int(y1) - y_bias * 8 - txt_bias * 2 - 300, light]
-                id_dict[str(id)] = [int(x0)+50, int(y1) - y_bias * 8 - txt_bias * 2]
+                # id_dict[str(id)] = [int(x0)+50, int(y1) - y_bias * 8 - int(txt_bias * 3.5)]
+#改动4
+                no_text_w = annotator.font.getsize("No." + str(id))[0] if hasattr(annotator, 'font') else 80  # 新增
+                cuvette_center_x = (cuvette_boxes[id - 1][0] + cuvette_boxes[id - 1][1]) / 2  # 新增
+                id_dict[str(id)] = [int(cuvette_center_x - no_text_w / 2), no_y]  # 修改
 
                 # add c_con, b_avg, g_avg, r_avg to the overall list
                 if have_table: overall_list.append((id, c_con, b_avg, g_avg, r_avg))
@@ -496,14 +550,39 @@ class Results(SimpleClass):
                 id = id + 1
             # draw the id and show the lights
             # make the id have the same y position
-            y_min = min([id_dict[key][1] for key in id_dict.keys()])
-            for key in id_dict.keys():
-                id_dict[key][1] = y_min
+
+            # y_min = min([id_dict[key][1] for key in id_dict.keys()])
+            # for key in id_dict.keys():
+            #     id_dict[key][1] = y_min
+
             # annotate the image with ids
             for key in id_dict.keys():
-                annotator.text(id_dict[key], "No." + key, txt_color=(0, 0, 0))
+                annotator.text(id_dict[key], "No." + key, txt_color=color_No)
                 # print(id_dict[key])
                 # print(min([id_dict[key][1] for key in id_dict.keys()]))
+#改动5
+            # 统一绘制 Con./R/G/B 文字，使用 con_y 作为统一 y 坐标
+            # 根据 Order_Con_R_G_B 控制显示顺序，根据 color_R/G/B 控制颜色
+            con_rgb_text_h = annotator.font.getsize("Con.")[1] if hasattr(annotator, 'font') else 60
+            txt_bias = con_rgb_text_h + distance_between_Con_R_G_B
+            # 定义 R/G/B 行的标签、数据索引、颜色
+            rgb_line_map = {
+                'R': ("R:", 2, color_R),
+                'G': ("G:", 3, color_G),
+                'B': ("B:", 4, color_B),
+            }
+            # 根据 Order_Con_R_G_B 解析 Con 之后的 R/G/B 顺序
+            # Order_Con_R_G_B 格式: 'ConRGB', 'ConRBG', 'ConGRB', 'ConGBR', 'ConBRG', 'ConBGR'
+            rgb_order = list(Order_Con_R_G_B[3:])  # 例如 'ConRGB' -> ['R', 'G', 'B']
+            for key in con_dict.keys():
+                x = con_dict[key][0]
+                # Con. 始终第一行
+                annotator.text([x, con_y], "Con.:" + str(con_dict[key][1]), txt_color=color_Con)
+                # 按顺序绘制 R/G/B
+                for i, ch in enumerate(rgb_order):
+                    label, idx, clr = rgb_line_map[ch]
+                    annotator.text([x, con_y + txt_bias * (i + 1)], label + str(con_dict[key][idx]), txt_color=clr)
+
             # light_dict
             if add_light:
                 # make the light position have the same y position
@@ -641,35 +720,37 @@ class Results(SimpleClass):
         return dict_result  # {key:list[]}
 
     def calAvgRgb(self, img, x, y, w, h, accuracy=16):
-        """calculate the average RGB values of a selected area to a certain accuracy"""
+        """calculate the average RGB values of a selected area to a certain accuracy.
+        Supports both cv2 (BGR numpy array) and PIL (RGB Image) input formats."""
         if 0 == w or 0 == h:
             return False
-        r_sum = 0
-        g_sum = 0
-        b_sum = 0
-        for width in range(w):
-            for height in range(h):
-                b, g, r = img[y + height, x + width]
-                #                print('h:',h,'s:',s,'v:',v)
-                r_sum = r_sum + r
-                g_sum = g_sum + g
-                b_sum = b_sum + b
-        #        print('a_sum =', a_sum)
-        #        print('b_sum =', b_sum)
-        #        print('c_sum =', c_sum)
 
-        self.accuracy = accuracy
-        # print('w*h=', w*h)
-        #        print('self.accuracy', self.accuracy)
-        if self.accuracy == 0:
-            r_avg = round(r_sum / (w * h))
-            g_avg = round(g_sum / (w * h))
-            b_avg = round(b_sum / (w * h))
+        # Convert to numpy array with RGB channel order
+        from PIL import Image
+        if isinstance(img, Image.Image):
+            # PIL Image: already RGB
+            img_arr = np.array(img)
+        elif isinstance(img, np.ndarray):
+            # cv2 numpy array: BGR -> RGB
+            img_arr = img[..., ::-1]
         else:
-            r_avg = round(r_sum / (w * h), self.accuracy)
-            g_avg = round(g_sum / (w * h), self.accuracy)
-            b_avg = round(b_sum / (w * h), self.accuracy)
-        #        print('a_avg', a_avg, 'b_avg', b_avg, 'c_avg', c_avg)
+            raise TypeError(f"Unsupported image type: {type(img)}")
+
+        # Crop the region and compute mean using vectorized operations
+        region = img_arr[y:y + h, x:x + w]
+        pixel_count = w * h
+        r_sum = region[:, :, 0].sum()
+        g_sum = region[:, :, 1].sum()
+        b_sum = region[:, :, 2].sum()
+
+        if accuracy == 0:
+            r_avg = round(r_sum / pixel_count)
+            g_avg = round(g_sum / pixel_count)
+            b_avg = round(b_sum / pixel_count)
+        else:
+            r_avg = round(float(r_sum / pixel_count), accuracy)
+            g_avg = round(float(g_sum / pixel_count), accuracy)
+            b_avg = round(float(b_sum / pixel_count), accuracy)
 
         return r_avg, g_avg, b_avg
 
