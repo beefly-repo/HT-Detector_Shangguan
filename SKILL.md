@@ -1,0 +1,11 @@
+
+程序设计的正确逻辑是：
+有两类识别物体：cuvette和liquid，他们的逻辑是liquid都在cuvette里面，即cuvette的bounding box 会将liquid的bounding box 完全包含在里面，每个在liquid列表中的元素都对应一个cuvette，所属于该cuvette，cuvette数量会大于等于liquid的数量。
+当有liquid被识别出来的时候，程序才将Con., R, G, B等参数添加到图片上，并且标记Con.的横坐标x轴的起始位置和该liquid所属的cuvette的横坐标x轴的起始位置相同。
+当某个cuvette没有其隶属的liquid被识别出来的时候，程序会认为该cuvette是空的，并且不会将任何参数添加到图片上。
+
+目前程序存在的问题是：
+程序没有给出将liquid和cuvette进行匹配的逻辑，当识别出来的cuvette数量大于liquid数量的时候，程序无法判断哪个cuvette是空的，哪个cuvette是有liquid的，因此无法正确地将参数添加到图片上。
+
+通读该project的代码，充分理解后，解决上面出现的问题。
+

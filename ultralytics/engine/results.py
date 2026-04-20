@@ -322,20 +322,33 @@ class Results(SimpleClass):
 
             # if color_channel not in ['R', 'G', 'B']: color_channel = 'B'
 ##改动1
-            # 收集所有 cuvette(class==0) 框的 y0(顶部) 和 y1(底部)
+            # 收集所有 cuvette(class==0) 框的完整 xyxy
             cuvette_y0_list = []
             cuvette_y1_list = []
-            cuvette_x0_list = []  # 新增
-            cuvette_x1_list = []  # 新增
+            cuvette_x0_list = []
+            cuvette_x1_list = []
             cuvette_index = 0
             for item in pred_boxes.cls:
                 if item.item() == 0:  # cuvette class
-                    cuvette_x0_list.append(pred_boxes.xyxy[cuvette_index][0].item())  # 新增
+                    cuvette_x0_list.append(pred_boxes.xyxy[cuvette_index][0].item())
                     cuvette_y0_list.append(pred_boxes.xyxy[cuvette_index][1].item())
-                    cuvette_x1_list.append(pred_boxes.xyxy[cuvette_index][2].item())  # 新增
+                    cuvette_x1_list.append(pred_boxes.xyxy[cuvette_index][2].item())
                     cuvette_y1_list.append(pred_boxes.xyxy[cuvette_index][3].item())
                 cuvette_index = cuvette_index + 1
-            cuvette_boxes = sorted(zip(cuvette_x0_list, cuvette_x1_list), key=lambda b: b[0])  # 新增
+            # 按 x0 从左到右排序的完整 cuvette 坐标 (x0, y0, x1, y1)
+            cuvettes = sorted(
+                zip(cuvette_x0_list, cuvette_y0_list, cuvette_x1_list, cuvette_y1_list),
+                key=lambda b: b[0]
+            )
+
+            # 判定某 liquid 是否属于某 cuvette：用 liquid 中心点落在 cuvette 框内
+            # （对检测框细小偏差更鲁棒，例如 liquid 框顶部略超出液面时）
+            def _liquid_in_cuvette(cuvette, liquid):
+                cx0, cy0, cx1, cy1 = cuvette
+                lx0, ly0, lx1, ly1 = liquid[0], liquid[1], liquid[2], liquid[3]
+                lcx = (lx0 + lx1) / 2.0
+                lcy = (ly0 + ly1) / 2.0
+                return cx0 <= lcx <= cx1 and cy0 <= lcy <= cy1
 
             # sort the coordinates of the expected class
             for item in pred_boxes.cls:
@@ -369,10 +382,22 @@ class Results(SimpleClass):
             # 计算 Con. 的统一 y 坐标：所有 cuvette 框底部最大值 + 100
             con_y = int(max(cuvette_y1_list)) + distance_between_cuvette_Con
 
-            # handle each sample in one image
-            for coor in coor_list:
-                # print('coor', coor)
-                # print('seperate:', coor[0], coor[1], coor[2], coor[3], coor[4], coor[5])
+            # 按 cuvette 位置（从左到右）驱动主循环：每个 cuvette 查找其包含的 liquid
+            # 空 cuvette（没有匹配的 liquid）直接跳过，不绘制任何参数
+            _used_liquids = set()
+            for cuvette_slot, cuvette in enumerate(cuvettes):
+                matched_coor = None
+                for _li, _cand in enumerate(coor_list):
+                    if _li in _used_liquids:
+                        continue
+                    if _liquid_in_cuvette(cuvette, _cand):
+                        matched_coor = (_li, _cand)
+                        break
+                if matched_coor is None:
+                    continue  # 空 cuvette，不绘制参数
+                _used_liquids.add(matched_coor[0])
+                coor = matched_coor[1]
+                id = cuvette_slot + 1
                 x0, y0, x1, y1, w, h = coor[0], coor[1], coor[2], coor[3], coor[4], coor[5]
                 # print('xywh', x0, y0, x1, y1, w, h)
 
@@ -496,25 +521,18 @@ class Results(SimpleClass):
                     # annotator.box_label(box=box1, label='YUe Hengmao')
 
                 # truncate RGB and concentration for display
+                # 注意：id 现在等于 cuvette_slot+1 (稀疏)，但这些 list 是每次迭代 append 一次，
+                # 所以当前样本永远是最新追加的一项，用 [-1] 更稳健。
                 if mode == 'linear':
-                    # print('ckkkkkkkk=', round(55.5535, rgb_display_accuracy))
-                    # print('linear_reg_dict[\'Red\'][id - 1]=', linear_reg_dict['Red'][id - 1])
-                    # print('type - linear_reg_dict[\'Red\'][id - 1]=', type(linear_reg_dict['Red'][id - 1]))
-                    con_dis = round(linear_reg_dict['Con.'][id - 1], con_display_accuracy)
-                    r_dis = round(linear_reg_dict['Red'][id - 1], rgb_display_accuracy)
-                    g_dis = round(linear_reg_dict['Green'][id - 1], rgb_display_accuracy)
-                    b_dis = round(linear_reg_dict['Blue'][id - 1], rgb_display_accuracy)
+                    con_dis = round(linear_reg_dict['Con.'][-1], con_display_accuracy)
+                    r_dis = round(linear_reg_dict['Red'][-1], rgb_display_accuracy)
+                    g_dis = round(linear_reg_dict['Green'][-1], rgb_display_accuracy)
+                    b_dis = round(linear_reg_dict['Blue'][-1], rgb_display_accuracy)
                 else: # default is detection
-                    # print('ckkkkkkkk=', round(56.7535, con_display_accuracy))
-                    # print('detection_dict[\'Con.\'][id - 1]=', detection_dict['Con.'][id - 1])
-                    # print('type - detection_dict[\'Con.\'][id - 1]=', type(detection_dict['Con.'][id - 1]))
-                    # print('weweewekkkk=', round(89.7535, rgb_display_accuracy))
-                    # print('detection_dict[\'Red\'][id - 1]=', detection_dict['Red'][id - 1])
-                    # print('type - detection_dict[\'Red\'][id - 1]=', type(detection_dict['Red'][id - 1]))
-                    con_dis = round(detection_dict['Con.'][id - 1], con_display_accuracy)
-                    r_dis = round(detection_dict['Red'][id - 1], rgb_display_accuracy)
-                    g_dis = round(detection_dict['Green'][id - 1], rgb_display_accuracy)
-                    b_dis = round(detection_dict['Blue'][id - 1], rgb_display_accuracy)
+                    con_dis = round(detection_dict['Con.'][-1], con_display_accuracy)
+                    r_dis = round(detection_dict['Red'][-1], rgb_display_accuracy)
+                    g_dis = round(detection_dict['Green'][-1], rgb_display_accuracy)
+                    b_dis = round(detection_dict['Blue'][-1], rgb_display_accuracy)
 
 
                 # print('b_avg = ', b_avg)
@@ -526,7 +544,8 @@ class Results(SimpleClass):
                 # annotator.text([int(x0), int(y1) + y_bias + txt_bias * 2], "B:" + str(b_dis), txt_color=(255, 0, 0))
                 # annotator.text([int(x0), int(y1) + y_bias + txt_bias * 3], "R:" + str(r_dis), txt_color=(0, 0, 255))
 #改动3
-                con_dict[str(id)] = [int(cuvette_boxes[id - 1][0]), con_dis, r_dis, g_dis, b_dis]
+                # x 锚点取自当前 cuvette（由中心点包含匹配到此 liquid），cuvette=(x0,y0,x1,y1)
+                con_dict[str(id)] = [int(cuvette[0]), con_dis, r_dis, g_dis, b_dis]
                 # annotator.text([int(x0), int(y1) - y_bias * 8 - txt_bias * 2], "No." + str(id), txt_color=(0, 0, 0))
                 if add_light:
                     if con_dis < 5:
@@ -538,16 +557,16 @@ class Results(SimpleClass):
                     light_dict[str(id)] = [int(x0)+15, int(y1) - y_bias * 8 - txt_bias * 2 - 300, light]
                 # id_dict[str(id)] = [int(x0)+50, int(y1) - y_bias * 8 - int(txt_bias * 3.5)]
 #改动4
-                no_text_w = annotator.font.getsize("No." + str(id))[0] if hasattr(annotator, 'font') else 80  # 新增
-                cuvette_center_x = (cuvette_boxes[id - 1][0] + cuvette_boxes[id - 1][1]) / 2  # 新增
-                id_dict[str(id)] = [int(cuvette_center_x - no_text_w / 2), no_y]  # 修改
+                no_text_w = annotator.font.getsize("No." + str(id))[0] if hasattr(annotator, 'font') else 80
+                cuvette_center_x = (cuvette[0] + cuvette[2]) / 2
+                id_dict[str(id)] = [int(cuvette_center_x - no_text_w / 2), no_y]
 
                 # add c_con, b_avg, g_avg, r_avg to the overall list
                 if have_table: overall_list.append((id, c_con, b_avg, g_avg, r_avg))
                 # the x0 of the last sample
                 if have_table: x0_last = x0
                 # print('x0_last =================== x0:', x0)
-                id = id + 1
+                # id 由 cuvette_slot 决定，循环尾不再自增
             # draw the id and show the lights
             # make the id have the same y position
 
