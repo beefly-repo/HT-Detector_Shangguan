@@ -9,3 +9,13 @@
 
 通读该project的代码，充分理解后，解决上面出现的问题。
 
+
+
+程序设计的正确逻辑应该是：
+无论cuvette是否包含liquid，程序都应该在cuvette上面标出其对应的标号，No.;
+当遇到空管时，即某个cuvette中没有liquid被识别出来时，程序应该在该cuvette上标出No.，并且在cuvette的下面正常添加Con., R, G, B等参数，只不过Con., R, G, B的值均设置为“XX”字样。
+
+目前程序存在的问题是：
+当cuvette中不包含liquid时，程序没有在该cuvette上标出No.，也没有在该cuvette下面添加Con., R, G, B等参数，导致无法区分哪些cuvette是空的，哪些cuvette是有liquid的。
+
+通读该project的代码，充分理解后，解决上面出现的问题。

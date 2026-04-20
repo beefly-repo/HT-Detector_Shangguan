@@ -383,7 +383,7 @@ class Results(SimpleClass):
             con_y = int(max(cuvette_y1_list)) + distance_between_cuvette_Con
 
             # 按 cuvette 位置（从左到右）驱动主循环：每个 cuvette 查找其包含的 liquid
-            # 空 cuvette（没有匹配的 liquid）直接跳过，不绘制任何参数
+            # 空 cuvette（没有匹配的 liquid）仍要标 No.X，并在下方显示 Con./R/G/B 参数行，数值以 "XX" 占位
             _used_liquids = set()
             for cuvette_slot, cuvette in enumerate(cuvettes):
                 matched_coor = None
@@ -393,11 +393,17 @@ class Results(SimpleClass):
                     if _liquid_in_cuvette(cuvette, _cand):
                         matched_coor = (_li, _cand)
                         break
+                id = cuvette_slot + 1
                 if matched_coor is None:
-                    continue  # 空 cuvette，不绘制参数
+                    # 空 cuvette：填入 "XX" 占位并完成 No./Con. 位置登记，跳过 RGB 取样与 Excel 记录
+                    con_dis = r_dis = g_dis = b_dis = "XX"
+                    con_dict[str(id)] = [int(cuvette[0]), con_dis, r_dis, g_dis, b_dis]
+                    no_text_w = annotator.font.getsize("No." + str(id))[0] if hasattr(annotator, 'font') else 80
+                    cuvette_center_x = (cuvette[0] + cuvette[2]) / 2
+                    id_dict[str(id)] = [int(cuvette_center_x - no_text_w / 2), no_y]
+                    continue
                 _used_liquids.add(matched_coor[0])
                 coor = matched_coor[1]
-                id = cuvette_slot + 1
                 x0, y0, x1, y1, w, h = coor[0], coor[1], coor[2], coor[3], coor[4], coor[5]
                 # print('xywh', x0, y0, x1, y1, w, h)
 
